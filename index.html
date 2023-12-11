@@ -333,7 +333,7 @@
 
 
 
-    const socket = new WebSocket('ws://localhost:3030/upload-progress');
+    const socket = new WebSocket('wss://discord-file-uploader.onrender.com/upload-progress');
 
     socket.onmessage = (event) => {
       const progressData = JSON.parse(event.data);
