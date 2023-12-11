@@ -46,6 +46,7 @@
     <label for="folderInput">Upload Folder (as zip):</label>
     <input type="file" name="folder" id="folderInput" webkitdirectory="" directory="" required>
     <button type="button" onclick="uploadFolder()">Upload Folder</button>
+    <div id="zip-progress-bar-container"></div>
   </form>
 
   <!-- Add a progress bar -->
@@ -122,25 +123,72 @@
   await fetchFilesList('name', 'asc');
     }
 
-    async function uploadFolder() {
-      const folderInput = document.getElementById('folderInput');
-      const formData = new FormData();
+// Function to dynamically create a zip progress bar
+function createZipProgressBar() {
+  const zipProgressBarContainer = document.createElement('div');
+  zipProgressBarContainer.id = 'zip-progress-bar-container';
+  
+  const label = document.createElement('label');
+  label.for = 'zip-progress-bar';
+  label.textContent = 'Zipping Progress:';
+  
+  const zipProgressBar = document.createElement('div');
+  zipProgressBar.id = 'zip-progress-bar';
+  
+  const innerProgressBar = document.createElement('div');
+  innerProgressBar.id = 'zip-progress-bar-inner';
+  zipProgressBar.appendChild(innerProgressBar);
+  
+  const zipProgressText = document.createElement('div');
+  zipProgressText.id = 'zip-progress-text';
+  zipProgressText.textContent = '0%';
+  
+  zipProgressBarContainer.appendChild(label);
+  zipProgressBarContainer.appendChild(zipProgressBar);
+  zipProgressBarContainer.appendChild(zipProgressText);
+  
+  return zipProgressBarContainer;
+}
 
-      for (const file of folderInput.files) {
-        formData.append('files', file);
-      }
+// Update your uploadFolder function
+async function uploadFolder() {
+  const folderInput = document.getElementById('folderInput');
+  const formData = new FormData();
 
-      const response = await fetch('https://discord-file-uploader.onrender.com/upload-folder', {
-        method: 'POST',
-        body: formData,
-      });
-      const result = await response.json();
-      const uploadTimeDiv = document.getElementById('uploadTime');
-      uploadTimeDiv.innerHTML = `"${result.originalFileName}" has been successfully uploaded. Time taken: ${formatTime(result.uploadTime)}`;
+  for (const file of folderInput.files) {
+    formData.append('files', file);
+  }
 
-        // Fetch and display the updated file list
-  await fetchFilesList('name', 'asc');
+  // Create and append the zip progress bar dynamically
+  const zipProgressBarContainer = createZipProgressBar();
+  document.body.appendChild(zipProgressBarContainer);
+
+  const zipProgressBar = document.getElementById('zip-progress-bar-inner');
+  const zipProgressText = document.getElementById('zip-progress-text');
+
+  const xhr = new XMLHttpRequest();
+
+  xhr.upload.addEventListener('progress', (event) => {
+    if (event.lengthComputable) {
+      const percentComplete = (event.loaded / event.total) * 100;
+      zipProgressBar.style.width = percentComplete + '%';
+      zipProgressText.textContent = percentComplete.toFixed(2) + '%';
     }
+  });
+
+  xhr.addEventListener('load', async () => {
+    // Remove the zip progress bar after completion
+    document.body.removeChild(zipProgressBarContainer);
+
+    // Fetch and display the updated file list
+    await fetchFilesList('name', 'asc');
+  });
+
+  xhr.open('POST', 'https://discord-file-uploader.onrender.com/upload-folder');
+  xhr.send(formData);
+}
+
+
 
 
     function getAllFilesFromFolder(folderInput) {
