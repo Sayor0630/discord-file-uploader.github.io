@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Discord File Uploader</title>
+
+  <!-- Add CSS style for the progress bar -->
+  <style>
+    #progress-bar {
+      width: 100%;
+      height: 20px;
+      background-color: #ddd;
+      margin-top: 20px;
+      position: relative;
+    }
+
+    #progress {
+      height: 100%;
+      width: 0;
+      background-color: #4caf50;
+      position: absolute;
+    }
+
+    #progress-text {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: #000;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Discord File Uploader</h1>
+
+  <form id="uploadForm" enctype="multipart/form-data">
+    <label for="fileInput">Upload File:</label>
+    <input type="file" name="file" id="fileInput" required>
+    <button type="button" onclick="uploadFile()">Upload File</button>
+
+    <br>
+
+    <label for="folderInput">Upload Folder (as zip):</label>
+    <input type="file" name="folder" id="folderInput" webkitdirectory="" directory="" required>
+    <button type="button" onclick="uploadFolder()">Upload Folder</button>
+  </form>
+
+  <!-- Add a progress bar -->
+  <div id="progress-bar">
+    <div id="progress"></div>
+    <div id="progress-text">0%</div>
+  </div>
+  <div id="remainingTime"></div>
+  <div id="uploadSpeed"></div>
+  <div id="uploadTime"></div>
+
+  <div id="downloadByIdSection">
+    <label for="fileIdInput">Download File by ID:</label>
+    <input type="text" id="fileIdInput" placeholder="Enter File ID">
+    <button onclick="downloadFile()">Download File</button>
+  </div>
+
+
+  <div id="fileList">
+    <div class="sort">
+      <label for="sortCriteria">Sort by:</label>
+      <select id="sortCriteria">
+        <option value="name">Name</option>
+        <option value="dateUploaded">Date Uploaded</option>
+        <option value="dateLastUpload">Date Last Upload</option>
+      </select>
+
+      <label for="sortOrder">Sort order:</label>
+      <select id="sortOrder">
+        <option value="asc">Ascending</option>
+        <option value="desc">Descending</option>
+      </select>
+
+      <!-- Add a button to trigger the sorting -->
+      <button onclick="sortFiles()">Sort Files</button>
+    </div>
+    <!-- Add a search field -->
+<div>
+<!-- Update the search field -->
+<label for="searchInput">Search:</label>
+<input type="text" id="searchInput" oninput="searchFilesOnServer()" placeholder="Enter fileId or originalFileName">
+
+<!-- Add a button to reset the search -->
+<button onclick="resetSearch()">Reset Search</button>
+</div>
+
+    <h2>Uploaded Files</h2>
+    <ul id="filesList">
+      
+    </ul>
+  </div>
+  
+
+  <!-- WebSocket script -->
+  <script>
+
+    async function uploadFile() {
+      const fileInput = document.getElementById('fileInput');
+      const file = fileInput.files[0];
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('https://discord-file-uploader.onrender.com/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const result = await response.json();
+      const uploadTimeDiv = document.getElementById('uploadTime');
+      uploadTimeDiv.innerHTML = `"${result.originalFileName}" has been successfully uploaded. Time taken: ${formatTime(result.uploadTime)}`;
+
+        // Fetch and display the updated file list
+  await fetchFilesList('name', 'asc');
+    }
+
+    async function uploadFolder() {
+      const folderInput = document.getElementById('folderInput');
+      const formData = new FormData();
+
+      for (const file of folderInput.files) {
+        formData.append('files', file);
+      }
+
+      const response = await fetch('https://discord-file-uploader.onrender.com/upload-folder', {
+        method: 'POST',
+        body: formData,
+      });
+      const result = await response.json();
+      const uploadTimeDiv = document.getElementById('uploadTime');
+      uploadTimeDiv.innerHTML = `"${result.originalFileName}" has been successfully uploaded. Time taken: ${formatTime(result.uploadTime)}`;
+
+        // Fetch and display the updated file list
+  await fetchFilesList('name', 'asc');
+    }
+
+
+    function getAllFilesFromFolder(folderInput) {
+      const files = [];
+      const traverse = (directory) => {
+        for (const item of directory) {
+          if (item.isDirectory) {
+            traverse(item.createReader());
+          } else {
+            files.push(item);
+          }
+        }
+      };
+
+      const items = folderInput.files;
+      traverse(items);
+
+      return files;
+    }
+
+    async function downloadFile() {
+      const fileIdInput = document.getElementById('fileIdInput');
+      const fileId = fileIdInput.value;
+
+      try {
+        const response = await fetch(`https://discord-file-uploader.onrender.com/download/${fileId}`);
+
+        if (!response.ok) {
+          console.error('Error downloading file:', response.statusText);
+          // Handle the error, show a message, or take appropriate action
+          return;
+        }
+
+        // Extract filename from response headers
+        const filename = response.headers.get('X-Original-Filename') || 'downloadedFile';
+
+        // Create a Blob from the response data
+        const fileBlob = await response.blob();
+
+        // Create a link element and trigger a click to initiate the download
+        const link = document.createElement('a');
+        link.href = window.URL.createObjectURL(fileBlob);
+        link.download = filename;
+        link.click();
+
+      } catch (error) {
+        console.error('Error downloading file:', error);
+        // Handle the error, show a message, or take appropriate action
+      }
+    }
+
+    // Add a function to fetch and display the list of uploaded files
+    // Add a function to fetch and display the list of uploaded files with sorting
+    async function sortFiles() {
+      const sortBy = document.getElementById('sortCriteria').value;
+      const sortOrder = document.getElementById('sortOrder').value;
+
+      // Fetch the files with the selected sorting criteria
+      await fetchFilesList(sortBy, sortOrder);
+    }
+
+
+
+
+
+    // Call the fetchFilesList function with default sorting on page load
+    document.addEventListener('DOMContentLoaded', async () => {
+      await fetchFilesList('name', 'asc');
+      resetSearch(); // Show all files initially
+    });
+
+
+    // ...
+
+    // Updated downloadFile function to collect necessary data
+    async function downloadFile(fileId, originalFileName, totalChunks) {
+      try {
+        // Check if all chunks are available
+        const chunksAvailable = await checkChunksAvailability(fileId, totalChunks);
+
+        if (chunksAvailable) {
+          // Trigger the download function
+          await downloadFromServer(fileId, originalFileName);
+        } else {
+          alert('Not all chunks are available. Please try again later.');
+        }
+
+      } catch (error) {
+        console.error('Error downloading file:', error);
+        // Handle the error, show a message, or take appropriate action
+      }
+    }
+
+    // Add a function to check if all chunks are available
+    async function checkChunksAvailability(fileId, totalChunks) {
+      try {
+        // Implement logic to check if all chunks are available in Discord
+        // You may need to modify this based on how you manage chunk availability in your Discord bot
+
+        // For now, assuming all chunks are available
+        return true;
+
+      } catch (error) {
+        console.error('Error checking chunks availability:', error);
+        // Handle the error, show a message, or take appropriate action
+        return false;
+      }
+    }
+
+
+
+
+    // Add a function to check the number of available chunks for a file
+    async function checkAvailableChunks(fileId, totalChunks) {
+      try {
+        // Implement logic to check the number of available chunks for a file
+        // You may need to modify this based on how you manage chunk availability in your Discord bot
+
+        // For now, assuming all chunks are available
+        return totalChunks;
+
+      } catch (error) {
+        console.error('Error checking available chunks:', error);
+        // Handle the error, show a message, or take appropriate action
+        return 0;
+      }
+    }
+
+    // ...
+
+    // Call the fetchFilesList function when the page loads
+    fetchFilesList();
+
+    // Add a function to trigger the file download from the server
+    async function downloadFromServer(fileId, originalFileName) {
+      try {
+        const response = await fetch(`https://discord-file-uploader.onrender.com/download/${fileId}`);
+
+        if (!response.ok) {
+          console.error('Error downloading file:', response.statusText);
+          // Handle the error, show a message, or take appropriate action
+          return;
+        }
+
+        // Extract filename from response headers
+        const filename = response.headers.get('X-Original-Filename') || 'downloadedFile';
+
+        // Create a Blob from the response data
+        const fileBlob = await response.blob();
+
+        // Create a link element and trigger a click to initiate the download
+        const link = document.createElement('a');
+        link.href = window.URL.createObjectURL(fileBlob);
+        link.download = filename;
+        link.click();
+
+      } catch (error) {
+        console.error('Error downloading file:', error);
+        // Handle the error, show a message, or take appropriate action
+      }
+    }
+
+
+    function formatTime(milliseconds) {
+      const seconds = Math.floor(milliseconds / 1000);
+      const minutes = Math.floor(seconds / 60);
+      const hours = Math.floor(minutes / 60);
+      const days = Math.floor(hours / 24);
+
+      const remainingSeconds = seconds % 60;
+      const remainingMinutes = minutes % 60;
+      const remainingHours = hours % 24;
+
+      const timeParts = [];
+      if (days > 0) {
+        timeParts.push(`${days} day(s)`);
+      }
+      if (remainingHours > 0) {
+        timeParts.push(`${remainingHours} hour(s)`);
+      }
+      if (remainingMinutes > 0) {
+        timeParts.push(`${remainingMinutes} minute(s)`);
+      }
+      if (remainingSeconds > 0) {
+        timeParts.push(`${remainingSeconds} second(s)`);
+      }
+
+      return timeParts.join(' ');
+    }
+
+
+
+    const socket = new WebSocket('ws://localhost:3030/upload-progress');
+
+    socket.onmessage = (event) => {
+      const progressData = JSON.parse(event.data);
+      updateProgressBar(progressData.progress);
+      updateRemainingTime(progressData.remainingTime);
+      updateUploadSpeed(progressData.uploadSpeed);
+    };
+
+    function updateProgressBar(progress) {
+      const progressBar = document.getElementById('progress');
+      const progressText = document.getElementById('progress-text');
+
+      progressBar.style.width = `${progress}%`;
+      progressText.innerText = `${Math.round(progress)}%`;
+    }
+
+    function updateRemainingTime(remainingTime) {
+      const remainingTimeElement = document.getElementById('remainingTime');
+      remainingTimeElement.innerText = `Remaining Time: ${remainingTime} s`;
+    }
+
+    function updateUploadSpeed(uploadSpeed) {
+      const uploadSpeedElement = document.getElementById('uploadSpeed');
+      uploadSpeedElement.innerText = `Speed: ${uploadSpeed} KB/s`;
+    }
+
+// Add a function to fetch and display the list of uploaded files with sorting and searching
+async function sortAndSearchFiles() {
+    const sortBy = document.getElementById('sortCriteria').value;
+    const sortOrder = document.getElementById('sortOrder').value;
+    const searchInput = document.getElementById('searchInput').value.trim().toLowerCase();
+
+    // Fetch the files with the selected sorting criteria and search input
+    await fetchFilesList(sortBy, sortOrder, searchInput);
+}
+
+// Update the fetchFilesList function to include the search logic
+async function fetchFilesList(sortBy, sortOrder, searchInput) {
+  try {
+    let endpoint = `https://discord-file-uploader.onrender.com/list-files?sortBy=${sortBy}&sortOrder=${sortOrder}`;
+
+    // Append searchInput to the endpoint if provided
+    if (searchInput) {
+      endpoint += `&searchInput=${searchInput}`;
+    }
+
+    const response = await fetch(endpoint);
+    const result = await response.json();
+
+    const filesListContainer = document.getElementById('filesList');
+    filesListContainer.innerHTML = ''; // Clear previous list
+
+    const filesList = result.filesList;
+    if (filesList.length === 0) {
+      filesListContainer.innerHTML = '<p>No files available.</p>';
+    } else {
+      const listElement = document.createElement('ol');
+      for (const file of filesList) {
+        // Check if all chunks are available before displaying the file in the list
+        const allChunksAvailable = file.currentChunks === file.totalChunks;
+
+        if (allChunksAvailable) {
+          const listItem = document.createElement('li');
+          listItem.innerHTML = `
+              <strong>${file.originalFileName}</strong> - 
+              <button onclick="downloadFile('${file.fileId}', '${file.originalFileName}', ${file.totalChunks})">Download</button>
+              <button onclick="deleteFile('${file.fileId}')">Delete</button>
+          `;
+          listElement.appendChild(listItem);
+        }
+      }
+      filesListContainer.appendChild(listElement);
+    }
+  } catch (error) {
+    console.error('Error fetching files list:', error);
+    // Handle the error, show a message, or take appropriate action
+  }
+}
+
+// Update the existing search function to trigger on input change
+document.getElementById('searchInput').addEventListener('input', () => {
+  searchFilesOnServer();
+});
+
+// Add a function to handle server-side search on input change
+async function searchFilesOnServer() {
+  const searchInput = document.getElementById('searchInput').value.trim().toLowerCase();
+
+  try {
+    const response = await fetch(`https://discord-file-uploader.onrender.com/search-files?searchInput=${searchInput}`);
+    const result = await response.json();
+
+    const filesListContainer = document.getElementById('filesList');
+    filesListContainer.innerHTML = ''; // Clear previous list
+
+    const filesList = result.filesList;
+    if (filesList.length === 0) {
+      filesListContainer.innerHTML = '<p>No matching files found.</p>';
+    } else {
+      const listElement = document.createElement('ol');
+      for (const file of filesList) {
+        const listItem = document.createElement('li');
+        listItem.innerHTML = `
+            <strong>${file.originalFileName}</strong> - 
+            <button onclick="downloadFile('${file.fileId}', '${file.originalFileName}', ${file.totalChunks})">Download</button>
+            <button onclick="deleteFile('${file.fileId}')">Delete</button>
+        `;
+        listElement.appendChild(listItem);
+      }
+      filesListContainer.appendChild(listElement);
+    }
+  } catch (error) {
+    console.error('Error searching files:', error);
+    // Handle the error, show a message, or take appropriate action
+  }
+}
+
+async function deleteFile(fileId) {
+  const confirmation = confirm("Are you sure you want to delete this file?");
+  if (!confirmation) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`https://discord-file-uploader.onrender.com/delete/${fileId}`, {
+      method: 'DELETE',
+    });
+
+    if (!response.ok) {
+      console.error('Error deleting file:', response.statusText);
+      // Handle the error, show a message, or take appropriate action
+      return;
+    }
+
+    // Display success message
+    const successMessage = document.createElement('div');
+    const result = await response.json();
+    successMessage.style.color = 'green';
+    successMessage.innerHTML = `"${result.originalFileName}" has been successfully deleted from the server.`;
+    document.body.appendChild(successMessage);
+
+    // Remove the success message after a few seconds
+    setTimeout(() => {
+      successMessage.remove();
+    }, 10000);
+
+    // Fetch and display the updated file list
+    await fetchFilesList('name', 'asc');
+  } catch (error) {
+    console.error('Error deleting file:', error);
+    // Handle the error, show a message, or take appropriate action
+  }
+}
+
+
+
+
+
+// Add a function to reset the search and show all files
+function resetSearch() {
+    document.getElementById('searchInput').value = '';
+    fetchFilesList('name', 'asc', ''); // Fetch all files
+}
+
+
+  </script>
+</body>
+
+</html>
